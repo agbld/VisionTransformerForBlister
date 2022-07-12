@@ -1,15 +1,8 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Oct 16 11:37:52 2020
-
-@author: mthossain
-"""
-
 #%%
 # import libraries
-
 import PIL
 import time
+from numpy import dtype
 import torch
 import torchvision
 import torch.nn.functional as F
@@ -18,6 +11,29 @@ from torch import nn
 from utils.dataset import TripletBlister_Dataset
 from utils.losses import TripletLoss
 from tqdm import tqdm
+
+from utils.networks import TripletNet
+
+#%%
+# settings and hyperparameters
+if __name__ == '__main__':
+    # settings
+    CUDA_AVAILABLE = torch.cuda.is_available()
+    print('CUDA available:', CUDA_AVAILABLE)
+    TRAIN_PATH    = './data/train_184'
+    TEST_PATH     = './data/test_184'
+
+    # hparam
+    IMG_SIZE = 512                      # image size (side length), default: 512
+    PATCH_SIZE = int(IMG_SIZE / 16)     # patch size (num of patch = patch_size ** 2), default: 4
+    DIM = 1024                          # total dimension of q, k, v vectors in each head (dim. of single q, k, v = dim // heads), default: 64
+    DEPTH = 8                           # number of attention layers, default: 6
+    HEADS = 8                           # number of attention heads, default: 8
+    OUTPUT_DIM = 1024                   # dimension of output embedding, default: 128
+    LEARNING_RATE = 0.0001              # learning rate
+    BATCH_SIZE_TRAIN = 32               # batch size for training
+    BATCH_SIZE_TEST = 32                # batch size for testing
+    N_EPOCHS = 150                      # number of epochs
 
 #%%
 # model definition
@@ -170,27 +186,6 @@ class ImageTransformer(nn.Module):
         
         return x
 
-#%%
-# settings and hyperparameters
-if __name__ == '__main__':
-    # settings
-    CUDA_AVAILABLE = torch.cuda.is_available()
-    print('CUDA available:', CUDA_AVAILABLE)
-    TRAIN_PATH    = './data/train_184'
-    TEST_PATH     = './data/test_184'
-
-    # hparam
-    IMG_SIZE = 128          # image size (side length), default: 512
-    PATCH_SIZE = 4          # patch size (num of patch = patch_size ** 2), default: 4
-    DIM = 64                # total dimension of q, k, v vectors in each head (dim. of single q, k, v = dim // heads), default: 64
-    DEPTH = 6               # number of attention layers, default: 6
-    HEADS = 8               # number of attention heads, default: 8
-    OUTPUT_DIM = 128        # dimension of output embedding, default: 128
-    LEARNING_RATE = 0.0001  # learning rate
-    BATCH_SIZE_TRAIN = 8    # batch size for training
-    BATCH_SIZE_TEST = 8     # batch size for testing
-    N_EPOCHS = 150          # number of epochs
-
 # %%
 # initialize dataloader
 if __name__ == '__main__':
@@ -242,29 +237,19 @@ def train(model, optimizer, data_loader, loss_fn, loss_history):
             optimizer.zero_grad()
             
             anchor, pos, neg = item[0].cuda(), item[1].cuda(), item[2].cuda()
-            anchor_embed = model(anchor)
-            pos_embed = model(pos)
-            neg_embed = model(neg)
-            loss = loss_fn(anchor_embed, pos_embed, neg_embed)
+            anchor, pos, neg = anchor.to(dtype=torch.float16), pos.to(dtype=torch.float16), neg.to(dtype=torch.float16)
             
-            # original loss function
-            # output = F.log_softmax(model(data), dim=1)
-            # loss = F.nll_loss(output, target)
+            anchor_output, pos_output, neg_output = model(anchor, pos, neg)
+            
+            loss = loss_fn(anchor_output.to(dtype=torch.float32), pos_output.to(dtype=torch.float32), neg_output.to(dtype=torch.float32))
+            
             loss.backward()
             optimizer.step()
 
-            # if i % 1 == 0:
             loss_history.append(loss.item())
-            t.set_postfix(loss='{:.4f}'.format(loss.item()))
-            # t.postfix(loss=loss.item())
+            with torch.no_grad():
+                t.set_postfix(loss='{:.4f}'.format(loss.item()))
             t.update(BATCH_SIZE_TRAIN)
-            #     print('Loss: ' + '{:6.4f}'.format(loss.item()), i)
-
-        # if i % 100 == 0:
-        #     print('[' +  '{:5}'.format(i * len(data)) + '/' + '{:5}'.format(total_samples) +
-        #           ' (' + '{:3.0f}'.format(100 * i / len(data_loader)) + '%)]  Loss: ' +
-        #           '{:6.4f}'.format(loss.item()))
-        #     loss_history.append(loss.item())
             
 def evaluate(model, data_loader, loss_history):
     model.eval()
@@ -294,7 +279,10 @@ def evaluate(model, data_loader, loss_history):
 if __name__ == '__main__':
     model = ImageTransformer(image_size=IMG_SIZE, patch_size=PATCH_SIZE, channels=3,
                 dim=DIM, depth=DEPTH, heads=HEADS, mlp_dim=OUTPUT_DIM)
+    model = TripletNet(model)
+    model = model.to(dtype=torch.float16)
     loss_fn = TripletLoss()
+    loss_fn = loss_fn.to(dtype=torch.float16)
     optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE)
 
 #%%
@@ -311,12 +299,3 @@ if __name__ == '__main__':
         # print('Execution time')
 
 #%%
-# PATH = ".\ViTnet_Cifar10_4x4_aug_1.pt" # Use your own path
-# torch.save(model.state_dict(), PATH)
-
-
-# =============================================================================
-# model = ViT()
-# model.load_state_dict(torch.load(PATH))
-# model.eval()            
-# =============================================================================
