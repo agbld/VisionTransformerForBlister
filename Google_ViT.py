@@ -112,8 +112,9 @@ class Transformer(nn.Module):
             x = mlp(x) #go to MLP_Block
         return x
 
+# modified for triplet loss
 class ImageTransformer(nn.Module):
-    def __init__(self, *, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, channels = 3, dropout = 0.1, emb_dropout = 0.1):
+    def __init__(self, *, image_size, patch_size, dim, depth, heads, mlp_dim, channels = 3, dropout = 0.1, emb_dropout = 0.1):
         super().__init__()
         assert image_size % patch_size == 0, 'image dimensions must be divisible by the patch size'
         num_patches = (image_size // patch_size) ** 2  # e.g. (32/4)**2= 64
@@ -131,11 +132,12 @@ class ImageTransformer(nn.Module):
 
         self.transformer = Transformer(dim, depth, heads, mlp_dim, dropout)
 
-        self.to_cls_token = nn.Identity()
+        # self.to_cls_token = nn.Identity()
 
-        self.nn1 = nn.Linear(dim, num_classes)  # if finetuning, just use a linear layer without further hidden layers (paper)
-        torch.nn.init.xavier_uniform_(self.nn1.weight)
-        torch.nn.init.normal_(self.nn1.bias, std = 1e-6)
+        # self.nn1 = nn.Linear(dim, num_classes)  # if finetuning, just use a linear layer without further hidden layers (paper)
+        # torch.nn.init.xavier_uniform_(self.nn1.weight)
+        # torch.nn.init.normal_(self.nn1.bias, std = 1e-6)
+        
         # self.af1 = nn.GELU() # use additinal hidden layers only when training on large datasets
         # self.do1 = nn.Dropout(dropout)
         # self.nn2 = nn.Linear(mlp_dim, num_classes)
@@ -170,69 +172,80 @@ class ImageTransformer(nn.Module):
 
 #%%
 # settings and hyperparameters
-# settings
-CUDA_AVAILABLE = torch.cuda.is_available()
-TRAIN_PATH    = './data/train'
-TEST_PATH     = './data/test'
+if __name__ == '__main__':
+    # settings
+    CUDA_AVAILABLE = torch.cuda.is_available()
+    print('CUDA available:', CUDA_AVAILABLE)
+    TRAIN_PATH    = './data/train_184'
+    TEST_PATH     = './data/test_184'
 
-# hparam
-BATCH_SIZE_TRAIN = 100
-BATCH_SIZE_TEST = 100
-N_EPOCHS = 150
-
-
+    # hparam
+    IMG_SIZE = 128          # image size (side length), default: 512
+    PATCH_SIZE = 4          # patch size (num of patch = patch_size ** 2), default: 4
+    DIM = 64                # total dimension of q, k, v vectors in each head (dim. of single q, k, v = dim // heads), default: 64
+    DEPTH = 6               # number of attention layers, default: 6
+    HEADS = 8               # number of attention heads, default: 8
+    OUTPUT_DIM = 128        # dimension of output embedding, default: 128
+    LEARNING_RATE = 0.0001  # learning rate
+    BATCH_SIZE_TRAIN = 8    # batch size for training
+    BATCH_SIZE_TEST = 8     # batch size for testing
+    N_EPOCHS = 150          # number of epochs
 
 # %%
 # initialize dataloader
+if __name__ == '__main__':
+    # data transform for blister images
+    data_transform = torchvision.transforms.Compose([
+        torchvision.transforms.Resize([IMG_SIZE, IMG_SIZE]),
+        torchvision.transforms.RandomHorizontalFlip(),
+        torchvision.transforms.RandomRotation(10, resample=PIL.Image.BILINEAR),
+        torchvision.transforms.RandomAffine(8, translate=(.15, .15)),
+        #
+        torchvision.transforms.ToTensor(),
+        torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                        std=[0.229, 0.224, 0.225]), ])
 
-# data transform for blister images
-data_transform = torchvision.transforms.Compose([
-    torchvision.transforms.Resize([512, 512]),
-    torchvision.transforms.RandomHorizontalFlip(),
-    torchvision.transforms.RandomRotation(10, resample=PIL.Image.BILINEAR),
-    torchvision.transforms.RandomAffine(8, translate=(.15, .15)),
-    #
-    torchvision.transforms.ToTensor(),
-    torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]), ])
+    # training dataset/dataloader
+    ps1_ps2_train_dataset = torchvision.datasets.ImageFolder(
+        root=TRAIN_PATH, transform=data_transform)
+    ps1_ps2_train_loader = torch.utils.data.DataLoader(
+        ps1_ps2_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, num_workers=1)
+    # testing dataset/dataloader
+    ps1_ps2_test_dataset = torchvision.datasets.ImageFolder(
+        root=TEST_PATH, transform=data_transform)
+    ps1_ps2_test_loader = torch.utils.data.DataLoader(
+        ps1_ps2_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=False, num_workers=1)
 
-# training dataset/dataloader
-ps1_ps2_train_dataset = torchvision.datasets.ImageFolder(
-    root=TRAIN_PATH, transform=data_transform)
-ps1_ps2_train_loader = torch.utils.data.DataLoader(
-    ps1_ps2_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, num_workers=1)
-# testing dataset/dataloader
-ps1_ps2_test_dataset = torchvision.datasets.ImageFolder(
-    root=TEST_PATH, transform=data_transform)
-ps1_ps2_test_loader = torch.utils.data.DataLoader(
-    ps1_ps2_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=False, num_workers=1)
+    # Triplet train dataset/dataloader
+    triplet_train_dataset = TripletBlister_Dataset(
+        ps1_ps2_train_dataset)  # Returns triplets of images
+    kwargs = {'num_workers': 1, 'pin_memory': True} if CUDA_AVAILABLE else {}
+    triplet_train_loader = torch.utils.data.DataLoader(
+        triplet_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, **kwargs)
 
-# Triplet train dataset/dataloader
-triplet_train_dataset = TripletBlister_Dataset(
-    ps1_ps2_train_dataset)  # Returns triplets of images
-kwargs = {'num_workers': 1, 'pin_memory': True} if CUDA_AVAILABLE else {}
-triplet_train_loader = torch.utils.data.DataLoader(
-    triplet_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, **kwargs)
-
-# Triplet test dataset/dataloader
-triplet_test_dataset = TripletBlister_Dataset(
-    ps1_ps2_test_dataset)  # Returns triplets of images
-kwargs = {'num_workers': 1, 'pin_memory': True} if CUDA_AVAILABLE else {}
-triplet_test_loader = torch.utils.data.DataLoader(
-    triplet_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=False, **kwargs)
+    # Triplet test dataset/dataloader
+    triplet_test_dataset = TripletBlister_Dataset(
+        ps1_ps2_test_dataset)  # Returns triplets of images
+    kwargs = {'num_workers': 1, 'pin_memory': True} if CUDA_AVAILABLE else {}
+    triplet_test_loader = torch.utils.data.DataLoader(
+        triplet_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=False, **kwargs)
 
 #%%
 # train, evaluation functions
-
 def train(model, optimizer, data_loader, loss_fn, loss_history):
     total_samples = len(data_loader.dataset)
     model.train()
+    model.cuda()
 
     with tqdm(total=total_samples, desc='Training') as t:
-        for i, (anchor, pos, neg) in enumerate(data_loader):
+        for i, (item, target) in enumerate(data_loader):
             optimizer.zero_grad()
             
-            loss = loss_fn(model(anchor), model(pos), model(neg))
+            anchor, pos, neg = item[0].cuda(), item[1].cuda(), item[2].cuda()
+            anchor_embed = model(anchor)
+            pos_embed = model(pos)
+            neg_embed = model(neg)
+            loss = loss_fn(anchor_embed, pos_embed, neg_embed)
             
             # original loss function
             # output = F.log_softmax(model(data), dim=1)
@@ -240,9 +253,11 @@ def train(model, optimizer, data_loader, loss_fn, loss_history):
             loss.backward()
             optimizer.step()
 
-            if i % 1 == 0:
-                loss_history.append(loss.item())
-                t.postfix(loss=loss.item())
+            # if i % 1 == 0:
+            loss_history.append(loss.item())
+            t.set_postfix(loss='{:.4f}'.format(loss.item()))
+            # t.postfix(loss=loss.item())
+            t.update(BATCH_SIZE_TRAIN)
             #     print('Loss: ' + '{:6.4f}'.format(loss.item()), i)
 
         # if i % 100 == 0:
@@ -276,23 +291,24 @@ def evaluate(model, data_loader, loss_history):
     
 #%%
 # initialize model
-model = ImageTransformer(image_size=32, patch_size=4, num_classes=10, channels=3,
-            dim=64, depth=6, heads=8, mlp_dim=128)
-loss_fn = TripletLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.003)
+if __name__ == '__main__':
+    model = ImageTransformer(image_size=IMG_SIZE, patch_size=PATCH_SIZE, channels=3,
+                dim=DIM, depth=DEPTH, heads=HEADS, mlp_dim=OUTPUT_DIM)
+    loss_fn = TripletLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE)
 
 #%%
 # run
-train_loss_history, test_loss_history = [], []
-for epoch in range(1, N_EPOCHS + 1):
-    print('Epoch:', epoch)
-    start_time = time.time()
-    train(model, optimizer, triplet_train_loader, loss_fn, train_loss_history)
-    print('Execution time:', '{:5.2f}'.format(time.time() - start_time), 'seconds')
-    
-    # evaluate(model, triplet_test_loader, test_loss_history)
-
-print('Execution time')
+if __name__ == '__main__':
+    train_loss_history, test_loss_history = [], []
+    for epoch in range(1, N_EPOCHS + 1):
+        print('Epoch:', epoch)
+        start_time = time.time()
+        train(model, optimizer, triplet_train_loader, loss_fn, train_loss_history)
+        print('Execution time:', '{:5.2f}'.format(time.time() - start_time), 'seconds')
+        
+        # evaluate(model, triplet_test_loader, test_loss_history)
+        # print('Execution time')
 
 #%%
 # PATH = ".\ViTnet_Cifar10_4x4_aug_1.pt" # Use your own path
