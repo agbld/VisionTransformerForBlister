@@ -4,6 +4,10 @@ Created on Fri Oct 16 11:37:52 2020
 
 @author: mthossain
 """
+
+#%%
+# import libraries
+
 import PIL
 import time
 import torch
@@ -11,6 +15,12 @@ import torchvision
 import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
+from utils.dataset import TripletBlister_Dataset
+from utils.losses import TripletLoss
+from tqdm import tqdm
+
+#%%
+# model definition
 
 class Residual(nn.Module):
     def __init__(self, fn):
@@ -147,9 +157,10 @@ class ImageTransformer(nn.Module):
 
         x = self.transformer(x, mask) #main game
 
-        x = self.to_cls_token(x[:, 0])
+        # remove class layer
+        # x = self.to_cls_token(x[:, 0])
+        # x = self.nn1(x)
         
-        x = self.nn1(x)
         # x = self.af1(x)
         # x = self.do1(x)
         # x = self.nn2(x)
@@ -157,48 +168,88 @@ class ImageTransformer(nn.Module):
         
         return x
 
+#%%
+# settings and hyperparameters
+# settings
+CUDA_AVAILABLE = torch.cuda.is_available()
+TRAIN_PATH    = './data/train'
+TEST_PATH     = './data/test'
 
+# hparam
 BATCH_SIZE_TRAIN = 100
 BATCH_SIZE_TEST = 100
-
-DL_PATH = "C:\Pytorch\Spyder\CIFAR10_data" # Use your own path
-# CIFAR10: 60000 32x32 color images in 10 classes, with 6000 images per class
-transform = torchvision.transforms.Compose(
-     [torchvision.transforms.RandomHorizontalFlip(),
-     torchvision.transforms.RandomRotation(10, resample=PIL.Image.BILINEAR),
-     torchvision.transforms.RandomAffine(8, translate=(.15,.15)),
-     torchvision.transforms.ToTensor(),
-     torchvision.transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+N_EPOCHS = 150
 
 
-train_dataset = torchvision.datasets.CIFAR10(DL_PATH, train=True,
-                                        download=True, transform=transform)
 
-test_dataset = torchvision.datasets.CIFAR10(DL_PATH, train=False,
-                                       download=True, transform=transform)
+# %%
+# initialize dataloader
 
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE_TRAIN,
-                                          shuffle=True)
+# data transform for blister images
+data_transform = torchvision.transforms.Compose([
+    torchvision.transforms.Resize([512, 512]),
+    torchvision.transforms.RandomHorizontalFlip(),
+    torchvision.transforms.RandomRotation(10, resample=PIL.Image.BILINEAR),
+    torchvision.transforms.RandomAffine(8, translate=(.15, .15)),
+    #
+    torchvision.transforms.ToTensor(),
+    torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225]), ])
 
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=BATCH_SIZE_TEST,
-                                         shuffle=False)
+# training dataset/dataloader
+ps1_ps2_train_dataset = torchvision.datasets.ImageFolder(
+    root=TRAIN_PATH, transform=data_transform)
+ps1_ps2_train_loader = torch.utils.data.DataLoader(
+    ps1_ps2_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, num_workers=1)
+# testing dataset/dataloader
+ps1_ps2_test_dataset = torchvision.datasets.ImageFolder(
+    root=TEST_PATH, transform=data_transform)
+ps1_ps2_test_loader = torch.utils.data.DataLoader(
+    ps1_ps2_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=False, num_workers=1)
 
-def train(model, optimizer, data_loader, loss_history):
+# Triplet train dataset/dataloader
+triplet_train_dataset = TripletBlister_Dataset(
+    ps1_ps2_train_dataset)  # Returns triplets of images
+kwargs = {'num_workers': 1, 'pin_memory': True} if CUDA_AVAILABLE else {}
+triplet_train_loader = torch.utils.data.DataLoader(
+    triplet_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, **kwargs)
+
+# Triplet test dataset/dataloader
+triplet_test_dataset = TripletBlister_Dataset(
+    ps1_ps2_test_dataset)  # Returns triplets of images
+kwargs = {'num_workers': 1, 'pin_memory': True} if CUDA_AVAILABLE else {}
+triplet_test_loader = torch.utils.data.DataLoader(
+    triplet_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=False, **kwargs)
+
+#%%
+# train, evaluation functions
+
+def train(model, optimizer, data_loader, loss_fn, loss_history):
     total_samples = len(data_loader.dataset)
     model.train()
 
-    for i, (data, target) in enumerate(data_loader):
-        optimizer.zero_grad()
-        output = F.log_softmax(model(data), dim=1)
-        loss = F.nll_loss(output, target)
-        loss.backward()
-        optimizer.step()
+    with tqdm(total=total_samples, desc='Training') as t:
+        for i, (anchor, pos, neg) in enumerate(data_loader):
+            optimizer.zero_grad()
+            
+            loss = loss_fn(model(anchor), model(pos), model(neg))
+            
+            # original loss function
+            # output = F.log_softmax(model(data), dim=1)
+            # loss = F.nll_loss(output, target)
+            loss.backward()
+            optimizer.step()
 
-        if i % 100 == 0:
-            print('[' +  '{:5}'.format(i * len(data)) + '/' + '{:5}'.format(total_samples) +
-                  ' (' + '{:3.0f}'.format(100 * i / len(data_loader)) + '%)]  Loss: ' +
-                  '{:6.4f}'.format(loss.item()))
-            loss_history.append(loss.item())
+            if i % 1 == 0:
+                loss_history.append(loss.item())
+                t.postfix(loss=loss.item())
+            #     print('Loss: ' + '{:6.4f}'.format(loss.item()), i)
+
+        # if i % 100 == 0:
+        #     print('[' +  '{:5}'.format(i * len(data)) + '/' + '{:5}'.format(total_samples) +
+        #           ' (' + '{:3.0f}'.format(100 * i / len(data_loader)) + '%)]  Loss: ' +
+        #           '{:6.4f}'.format(loss.item()))
+        #     loss_history.append(loss.item())
             
 def evaluate(model, data_loader, loss_history):
     model.eval()
@@ -222,26 +273,30 @@ def evaluate(model, data_loader, loss_history):
           '  Accuracy:' + '{:5}'.format(correct_samples) + '/' +
           '{:5}'.format(total_samples) + ' (' +
           '{:4.2f}'.format(100.0 * correct_samples / total_samples) + '%)\n')
-
-N_EPOCHS = 150
-
+    
+#%%
+# initialize model
 model = ImageTransformer(image_size=32, patch_size=4, num_classes=10, channels=3,
             dim=64, depth=6, heads=8, mlp_dim=128)
+loss_fn = TripletLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.003)
 
-
+#%%
+# run
 train_loss_history, test_loss_history = [], []
 for epoch in range(1, N_EPOCHS + 1):
     print('Epoch:', epoch)
     start_time = time.time()
-    train(model, optimizer, train_loader, train_loss_history)
+    train(model, optimizer, triplet_train_loader, loss_fn, train_loss_history)
     print('Execution time:', '{:5.2f}'.format(time.time() - start_time), 'seconds')
-    evaluate(model, test_loader, test_loss_history)
+    
+    # evaluate(model, triplet_test_loader, test_loss_history)
 
 print('Execution time')
 
-PATH = ".\ViTnet_Cifar10_4x4_aug_1.pt" # Use your own path
-torch.save(model.state_dict(), PATH)
+#%%
+# PATH = ".\ViTnet_Cifar10_4x4_aug_1.pt" # Use your own path
+# torch.save(model.state_dict(), PATH)
 
 
 # =============================================================================
