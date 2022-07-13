@@ -24,3 +24,23 @@ class TripletLoss(nn.Module):
             1 + torch.exp(distance_positive - distance_negative))
 
         return losses.mean() if size_average else losses.sum()
+
+class TripletLoss_fix(nn.Module):
+    """
+    Triplet loss
+    Takes embeddings of an anchor sample, a positive sample and a negative sample
+    """
+
+    def __init__(self):
+        super(TripletLoss_fix, self).__init__()
+
+    def forward(self, anchor, positive, negative, size_average=True):
+        distance_positive = torch.cdist(
+            anchor.unsqueeze(1), positive.unsqueeze(1), p=2)
+        distance_negative = torch.cdist(
+            anchor.unsqueeze(1), negative.unsqueeze(1), p=2)
+
+        losses = torch.log(
+            1 + torch.exp(distance_positive - distance_negative))
+
+        return losses.mean() if size_average else losses.sum()

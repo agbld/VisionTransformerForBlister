@@ -1,18 +1,17 @@
 #%%
 # import libraries
+import argparse
 import PIL
 import time
-from numpy import dtype
 import torch
 import torchvision
 import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
 from utils.dataset import TripletBlister_Dataset
-from utils.losses import TripletLoss
-from tqdm import tqdm
-
+from utils.losses import TripletLoss, TripletLoss_fix
 from utils.networks import TripletNet
+from tqdm import tqdm
 
 #%%
 # settings and hyperparameters
@@ -20,20 +19,69 @@ if __name__ == '__main__':
     # settings
     CUDA_AVAILABLE = torch.cuda.is_available()
     print('CUDA available:', CUDA_AVAILABLE)
-    TRAIN_PATH    = './data/train_184'
-    TEST_PATH     = './data/test_184'
+    TRAIN_PATH    = './data/train_50'
+    TEST_PATH     = './data/test_50'
 
     # hparam
-    IMG_SIZE = 512                      # image size (side length), default: 512
-    PATCH_SIZE = int(IMG_SIZE / 16)     # patch size (num of patch = patch_size ** 2), default: 4
+    IMG_SIZE = 416                      # image size (side length), default: 512
+    PATCH_SIZE = int(IMG_SIZE / 13)      # patch size (num of patch = patch_size ** 2), default: 4
     DIM = 1024                          # total dimension of q, k, v vectors in each head (dim. of single q, k, v = dim // heads), default: 64
     DEPTH = 8                           # number of attention layers, default: 6
     HEADS = 8                           # number of attention heads, default: 8
     OUTPUT_DIM = 1024                   # dimension of output embedding, default: 128
     LEARNING_RATE = 0.0001              # learning rate
-    BATCH_SIZE_TRAIN = 32               # batch size for training
-    BATCH_SIZE_TEST = 32                # batch size for testing
+    BATCH_SIZE_TRAIN = 64               # batch size for training
+    BATCH_SIZE_TEST = 64                # batch size for testing
     N_EPOCHS = 150                      # number of epochs
+    
+    try:
+        # argument parser (for command line arguments)
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--train_path', type=str, default=TRAIN_PATH)
+        parser.add_argument('--test_path', type=str, default=TEST_PATH)
+        parser.add_argument('--img_size', type=int, default=IMG_SIZE)
+        parser.add_argument('--patch_size', type=int, default=PATCH_SIZE)
+        parser.add_argument('--dim', type=int, default=DIM)
+        parser.add_argument('--depth', type=int, default=DEPTH)
+        parser.add_argument('--heads', type=int, default=HEADS)
+        parser.add_argument('--output_dim', type=int, default=OUTPUT_DIM)
+        parser.add_argument('--learning_rate', type=float, default=LEARNING_RATE)
+        parser.add_argument('--batch_size_train', type=int, default=BATCH_SIZE_TRAIN)
+        parser.add_argument('--batch_size_test', type=int, default=BATCH_SIZE_TEST)
+        parser.add_argument('--n_epochs', type=int, default=N_EPOCHS)
+        args = parser.parse_args()
+        
+        # assign arguments to variables
+        TRAIN_PATH    = args.train_path
+        TEST_PATH     = args.test_path
+        IMG_SIZE      = args.img_size
+        PATCH_SIZE    = args.patch_size
+        DIM           = args.dim
+        DEPTH         = args.depth
+        HEADS         = args.heads
+        OUTPUT_DIM    = args.output_dim
+        LEARNING_RATE = args.learning_rate
+        BATCH_SIZE_TRAIN = args.batch_size_train
+        BATCH_SIZE_TEST = args.batch_size_test
+        N_EPOCHS      = args.n_epochs
+        
+    except:
+        # use default settings if no command line arguments
+        print('arguments error, use default settings')
+    
+    print('\nArguments:')
+    print('TRAIN_PATH:', TRAIN_PATH)
+    print('TEST_PATH:', TEST_PATH)
+    print('IMG_SIZE:', IMG_SIZE)
+    print('PATCH_SIZE:', PATCH_SIZE)
+    print('DIM:', DIM)
+    print('DEPTH:', DEPTH)
+    print('HEADS:', HEADS)
+    print('OUTPUT_DIM:', OUTPUT_DIM)
+    print('LEARNING_RATE:', LEARNING_RATE)
+    print('BATCH_SIZE_TRAIN:', BATCH_SIZE_TRAIN)
+    print('BATCH_SIZE_TEST:', BATCH_SIZE_TEST)
+    print('N_EPOCHS:', N_EPOCHS)
 
 #%%
 # model definition
@@ -195,7 +243,6 @@ if __name__ == '__main__':
         torchvision.transforms.RandomHorizontalFlip(),
         torchvision.transforms.RandomRotation(10, resample=PIL.Image.BILINEAR),
         torchvision.transforms.RandomAffine(8, translate=(.15, .15)),
-        #
         torchvision.transforms.ToTensor(),
         torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                         std=[0.229, 0.224, 0.225]), ])
@@ -281,8 +328,7 @@ if __name__ == '__main__':
                 dim=DIM, depth=DEPTH, heads=HEADS, mlp_dim=OUTPUT_DIM)
     model = TripletNet(model)
     model = model.to(dtype=torch.float16)
-    loss_fn = TripletLoss()
-    loss_fn = loss_fn.to(dtype=torch.float16)
+    loss_fn = TripletLoss_fix()
     optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE)
 
 #%%
