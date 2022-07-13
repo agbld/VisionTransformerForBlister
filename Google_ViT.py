@@ -1,14 +1,17 @@
 #%%
 # import libraries
 import argparse
+import os
 import PIL
-import time
 import torch
+import numpy as np
+import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader
 import torchvision
 import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
-from utils.dataset import TripletBlister_Dataset
+from utils.dataset import TripletBlister_Dataset, Prototype_Dataset
 from utils.losses import TripletLoss, TripletLoss_fix
 from utils.networks import TripletNet
 from tqdm import tqdm
@@ -21,10 +24,15 @@ if __name__ == '__main__':
     print('CUDA available:', CUDA_AVAILABLE)
     TRAIN_PATH    = './data/train_50'
     TEST_PATH     = './data/test_50'
+    
+    LOAD_MODEL    = True
+    MODEL_PATH    = './models/tmp.pt'
+    SAVE_EPOCHS = 1                     # number of epochs to save model
+    NUM_WORKERS = 4                     # number of workers for data loader
 
     # hparam
     IMG_SIZE = 416                      # image size (side length), default: 512
-    PATCH_SIZE = int(IMG_SIZE / 13)      # patch size (num of patch = patch_size ** 2), default: 4
+    PATCH_SIZE = int(IMG_SIZE / 13)     # patch size (num of patch = patch_size ** 2), default: 4
     DIM = 1024                          # total dimension of q, k, v vectors in each head (dim. of single q, k, v = dim // heads), default: 64
     DEPTH = 8                           # number of attention layers, default: 6
     HEADS = 8                           # number of attention heads, default: 8
@@ -85,7 +93,6 @@ if __name__ == '__main__':
 
 #%%
 # model definition
-
 class Residual(nn.Module):
     def __init__(self, fn):
         super().__init__()
@@ -196,7 +203,7 @@ class ImageTransformer(nn.Module):
 
         self.transformer = Transformer(dim, depth, heads, mlp_dim, dropout)
 
-        # self.to_cls_token = nn.Identity()
+        self.to_cls_token = nn.Identity()
 
         # self.nn1 = nn.Linear(dim, num_classes)  # if finetuning, just use a linear layer without further hidden layers (paper)
         # torch.nn.init.xavier_uniform_(self.nn1.weight)
@@ -223,8 +230,9 @@ class ImageTransformer(nn.Module):
 
         x = self.transformer(x, mask) #main game
 
+        x = self.to_cls_token(x[:, 0])
+        
         # remove class layer
-        # x = self.to_cls_token(x[:, 0])
         # x = self.nn1(x)
         
         # x = self.af1(x)
@@ -250,27 +258,28 @@ if __name__ == '__main__':
     # training dataset/dataloader
     ps1_ps2_train_dataset = torchvision.datasets.ImageFolder(
         root=TRAIN_PATH, transform=data_transform)
-    ps1_ps2_train_loader = torch.utils.data.DataLoader(
-        ps1_ps2_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, num_workers=1)
+    # ps1_ps2_train_loader = DataLoader(
+    #     ps1_ps2_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, num_workers=NUM_WORKERS)
+
     # testing dataset/dataloader
     ps1_ps2_test_dataset = torchvision.datasets.ImageFolder(
         root=TEST_PATH, transform=data_transform)
-    ps1_ps2_test_loader = torch.utils.data.DataLoader(
-        ps1_ps2_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=False, num_workers=1)
+    # ps1_ps2_test_loader = DataLoader(
+    #     ps1_ps2_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=True, num_workers=NUM_WORKERS)
 
     # Triplet train dataset/dataloader
     triplet_train_dataset = TripletBlister_Dataset(
         ps1_ps2_train_dataset)  # Returns triplets of images
-    kwargs = {'num_workers': 1, 'pin_memory': True} if CUDA_AVAILABLE else {}
-    triplet_train_loader = torch.utils.data.DataLoader(
+    kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
+    triplet_train_loader = DataLoader(
         triplet_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, **kwargs)
 
     # Triplet test dataset/dataloader
     triplet_test_dataset = TripletBlister_Dataset(
         ps1_ps2_test_dataset)  # Returns triplets of images
-    kwargs = {'num_workers': 1, 'pin_memory': True} if CUDA_AVAILABLE else {}
-    triplet_test_loader = torch.utils.data.DataLoader(
-        triplet_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=False, **kwargs)
+    kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
+    triplet_test_loader = DataLoader(
+        triplet_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=True, **kwargs)
 
 #%%
 # train, evaluation functions
@@ -280,54 +289,115 @@ def train(model, optimizer, data_loader, loss_fn, loss_history):
     model.cuda()
 
     with tqdm(total=total_samples, desc='Training') as t:
+        loss_history_epoch = []
         for i, (item, target) in enumerate(data_loader):
             optimizer.zero_grad()
             
             anchor, pos, neg = item[0].cuda(), item[1].cuda(), item[2].cuda()
-            anchor, pos, neg = anchor.to(dtype=torch.float16), pos.to(dtype=torch.float16), neg.to(dtype=torch.float16)
+            anchor, pos, neg = anchor.half(), pos.half(), neg.half()
             
-            anchor_output, pos_output, neg_output = model(anchor, pos, neg)
+            anchor_output = model(anchor)
+            pos_output = model(pos)
+            neg_output = model(neg)
             
-            loss = loss_fn(anchor_output.to(dtype=torch.float32), pos_output.to(dtype=torch.float32), neg_output.to(dtype=torch.float32))
+            # anchor_output, pos_output, neg_output = model(anchor, pos, neg)
+            
+            # assert if any input of loss_fn is nan
+            if torch.isnan(anchor_output).any() or torch.isnan(pos_output).any() or torch.isnan(neg_output).any():
+                print(anchor_output)
+                print(pos_output)
+                print(neg_output)
+                print('\n')
+                assert False and 'nan detected in loss_fn inputs'
+                
+            loss = loss_fn(anchor_output.float(), pos_output.float(), neg_output.float())
             
             loss.backward()
             optimizer.step()
 
-            loss_history.append(loss.item())
+            loss_history_epoch.append(loss.item())
             with torch.no_grad():
                 t.set_postfix(loss='{:.4f}'.format(loss.item()))
-            t.update(BATCH_SIZE_TRAIN)
-            
-def evaluate(model, data_loader, loss_history):
-    model.eval()
+            t.update(anchor.shape[0])
+        loss_epoch = np.mean(loss_history_epoch)
+        t.set_postfix(loss='{:.4f}'.format(loss_epoch))
     
-    total_samples = len(data_loader.dataset)
-    correct_samples = 0
-    total_loss = 0
+    loss_history.append(loss_epoch)
 
-    with torch.no_grad():
-        for data, target in data_loader:
-            output = F.log_softmax(model(data), dim=1)
-            loss = F.nll_loss(output, target, reduction='sum')
-            _, pred = torch.max(output, dim=1)
+def get_class_embed(model, triplet_dataset):
+    prototype_dataset = Prototype_Dataset(triplet_dataset.blister_dataset, len(triplet_dataset.labels_set), list(range(48)))
+    model.eval()
+    model.cuda()
+    
+    cls_idx_2_embed = {}
+    with tqdm(total=len(triplet_dataset.labels_set), desc='Getting class embeddings') as t:
+        for cls_idx in triplet_dataset.labels_set:
+            # embed_list = []
+            imgs = torch.stack(prototype_dataset[cls_idx])
             
-            total_loss += loss.item()
-            correct_samples += pred.eq(target).sum()
+            with torch.no_grad():
+                imgs = imgs.cuda()
+                imgs = imgs.to(dtype=torch.float16)
+                output = model(imgs)
+                output = output.mean(dim=0)
+            cls_idx_2_embed[cls_idx] = output
+            t.update()
 
-    avg_loss = total_loss / total_samples
-    loss_history.append(avg_loss)
-    print('\nAverage test loss: ' + '{:.4f}'.format(avg_loss) +
-          '  Accuracy:' + '{:5}'.format(correct_samples) + '/' +
-          '{:5}'.format(total_samples) + ' (' +
-          '{:4.2f}'.format(100.0 * correct_samples / total_samples) + '%)\n')
+    return cls_idx_2_embed
+
+def evaluate_classification(model: ImageTransformer, triplet_dataset: TripletBlister_Dataset, blister_loader: DataLoader, loss_history):
+    model.eval()
+    model.cuda()
+    
+    cls_idx_2_embed = get_class_embed(model, triplet_dataset)
+    
+    for _, (imgs, labels) in enumerate(blister_loader):
+        imgs = imgs.half()
+        imgs = imgs.cuda()
+        
+        with torch.no_grad():
+            outputs = model(imgs)
+            
+        distances = torch.cdist(outputs, cls_idx_2_embed.values(), p=2)
+        
+        
+        break
+    
+    return distances
+            
+def evaluate(model, data_loader, loss_fn, loss_history):
+    total_samples = len(data_loader.dataset)
+    model.eval()
+    model.cuda()
+
+    with tqdm(total=total_samples, desc='Evaluating') as t:
+        loss_history_epoch = []
+        with torch.no_grad():
+            for i, (item, target) in enumerate(data_loader):
+                anchor, pos, neg = item[0].cuda(), item[1].cuda(), item[2].cuda()
+                anchor, pos, neg = anchor.half(), pos.half(), neg.half()
+                
+                anchor_output = model(anchor)
+                pos_output = model(pos)
+                neg_output = model(neg)
+                loss = loss_fn(anchor_output.float(), pos_output.float(), neg_output.float())
+
+                loss_history_epoch.append(loss.item())
+                t.set_postfix(loss='{:.4f}'.format(loss.item()))
+                t.update(anchor.shape[0])
+                
+        loss_epoch = np.mean(loss_history_epoch)
+        t.set_postfix(loss='{:.4f}'.format(loss_epoch))
+    
+    loss_history.append(np.mean(loss_epoch))
     
 #%%
 # initialize model
 if __name__ == '__main__':
     model = ImageTransformer(image_size=IMG_SIZE, patch_size=PATCH_SIZE, channels=3,
                 dim=DIM, depth=DEPTH, heads=HEADS, mlp_dim=OUTPUT_DIM)
-    model = TripletNet(model)
-    model = model.to(dtype=torch.float16)
+    # model = TripletNet(model)
+    model = model.half()
     loss_fn = TripletLoss_fix()
     optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE)
 
@@ -335,13 +405,30 @@ if __name__ == '__main__':
 # run
 if __name__ == '__main__':
     train_loss_history, test_loss_history = [], []
+    
+    if LOAD_MODEL:
+        # load model if exists
+        if os.path.exists(MODEL_PATH):
+            print('Loading model from ' + MODEL_PATH)
+            model.load_state_dict(torch.load(MODEL_PATH))
+        else:
+            print('Model not found at ' + MODEL_PATH)
+    
     for epoch in range(1, N_EPOCHS + 1):
-        print('Epoch:', epoch)
-        start_time = time.time()
+        print('Epoch:{}/{}'.format(epoch, N_EPOCHS))
         train(model, optimizer, triplet_train_loader, loss_fn, train_loss_history)
-        print('Execution time:', '{:5.2f}'.format(time.time() - start_time), 'seconds')
+        evaluate(model, triplet_test_loader, loss_fn, test_loss_history)
         
-        # evaluate(model, triplet_test_loader, test_loss_history)
-        # print('Execution time')
+        # plot train_loss_history and test_loss_history in a figure
+        plt.figure(figsize=(10, 5))
+        plt.plot(train_loss_history, label='train')
+        plt.plot(test_loss_history, label='test')
+        plt.legend()
+        plt.show()
+        
+        # save model
+        if epoch % SAVE_EPOCHS == 0:
+            torch.save(model.state_dict(), MODEL_PATH)
+            print('Saved model to ' + MODEL_PATH)
 
 #%%
