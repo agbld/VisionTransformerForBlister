@@ -1,1 +1,1 @@
-python Google_ViT.py --train_path ./data/train_50 --test_path ./data/test_50 --img_size 416 --patch_size 32 --dim 1024 --depth 8 --heads 8 --output_dim 1024 --learning_rate 0.0001 --batch_size_train 64 --batch_size_test 64 --n_epochs 150
+python Google_ViT.py --train_path ./data/train_50 --test_path ./data/test_50 --img_size 416 --patch_size 32 --dim 1024 --depth 8 --heads 8 --output_dim 1024 --learning_rate 0.001 --batch_size_train 64 --batch_size_test 64 --n_epochs 150

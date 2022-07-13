@@ -29,9 +29,9 @@ if __name__ == '__main__':
     LOAD_MODEL    = True
     MODEL_PATH    = './models/tmp.pt'
     SAVE_EPOCHS = 1                     # number of epochs to save model
-    EVAL_EPOCHS = 1                     # number of epochs to evaluate model
+    EVAL_EPOCHS = 5                     # number of epochs to evaluate model
     NUM_WORKERS = 4                     # number of workers for data loader
-    USE_HALF = True                     # use half precision
+    USE_HALF = False                     # use half precision
 
     # hparam
     IMG_SIZE = 416                      # image size (side length), default: 512
@@ -41,8 +41,8 @@ if __name__ == '__main__':
     HEADS = 8                           # number of attention heads, default: 8
     OUTPUT_DIM = 1024                   # dimension of output embedding, default: 128
     LEARNING_RATE = 0.0001              # learning rate
-    BATCH_SIZE_TRAIN = 64               # batch size for training
-    BATCH_SIZE_TEST = 64                # batch size for testing
+    BATCH_SIZE_TRAIN = 32               # batch size for training
+    BATCH_SIZE_TEST = 32                # batch size for testing
     N_EPOCHS = 150                      # number of epochs
     
     try:
@@ -383,7 +383,8 @@ def get_class_embed(model, triplet_dataset):
             with torch.no_grad():
                 if CUDA_AVAILABLE:
                     imgs = imgs.cuda()
-                imgs = imgs.to(dtype=torch.float16)
+                if USE_HALF:
+                    imgs = imgs.half()
                 output = model(imgs)
                 output = output.mean(dim=0)
             cls_idx_2_embed[cls_idx] = output

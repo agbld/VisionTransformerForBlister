@@ -62,6 +62,7 @@ TRAIN_PATH    = './data/train_50'
 IMG_SIZE = 416
 
 data_transform = torchvision.transforms.Compose([
+    torchvision.transforms.CenterCrop(512),
     torchvision.transforms.Resize([IMG_SIZE, IMG_SIZE]),
     torchvision.transforms.RandomHorizontalFlip(),
     torchvision.transforms.RandomRotation(10, resample=PIL.Image.BILINEAR),
@@ -69,9 +70,8 @@ data_transform = torchvision.transforms.Compose([
     torchvision.transforms.ToTensor(),
     # torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
     #                                 std=[0.229, 0.224, 0.225]), 
-    torchvision.transforms.Normalize(mean=[0.4590, 0.4521, 0.4120], # training set mean (r, g, b)
-                                    std=[0.2468, 0.2397, 0.2307]),  # training set std (r, g, b)
-    torchvision.transforms.CenterCrop(IMG_SIZE/2),
+    # torchvision.transforms.Normalize(mean=[0.4590, 0.4521, 0.4120], # training set mean (r, g, b)
+    #                                 std=[0.2468, 0.2397, 0.2307]),  # training set std (r, g, b)
     ])
 ps1_ps2_train_dataset = torchvision.datasets.ImageFolder(
     root=TRAIN_PATH, transform=data_transform)
@@ -88,9 +88,9 @@ for cls_idx in range(1):
     # std_list.append(imgs.std(dim=(1, 2, 3)))
     first_img = imgs[0]
     first_img: torch.Tensor
-    first_img[0] = first_img[0] + 0.4590
-    first_img[1] = first_img[1] + 0.4521
-    first_img[2] = first_img[2] + 0.4120
+    # first_img[0] = first_img[0] + 0.4590
+    # first_img[1] = first_img[1] + 0.4521
+    # first_img[2] = first_img[2] + 0.4120
     print(cls_idx, first_img.shape)
     # print(first_img)
     plt.imshow((first_img.permute(1, 2, 0)))
