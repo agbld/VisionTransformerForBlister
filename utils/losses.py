@@ -44,3 +44,43 @@ class TripletLoss_fix(nn.Module):
             1 + torch.exp(distance_positive - distance_negative))
 
         return losses.mean() if size_average else losses.sum()
+
+class TripletLoss_fix2(nn.Module):
+    """
+    Triplet loss
+    Takes embeddings of an anchor sample, a positive sample and a negative sample
+    """
+
+    def __init__(self):
+        super(TripletLoss_fix2, self).__init__()
+
+    def forward(self, anchor, positive, negative, size_average=True):
+        # cos_sim = torch.nn.CosineSimilarity(dim=1)
+
+        # CosineSimilarity
+        # cos = nn.CosineSimilarity(dim=0)
+        # distance_positive = 1 - cos(anchor, positive)
+        # distance_negative = 1 - cos(anchor, negative)
+
+        # Euclidean distance
+        # distance_positive = np.linalg.norm(anchor-positive)
+        # distance_negative = np.linalg.norm(anchor-negative)
+        total_loss = []
+        for a, p, n in zip(anchor, positive, negative):
+            # distance_positive = torch.cdist(anchor.unsqueeze(0), positive.unsqueeze(0), p=2)
+            # distance_negative = torch.cdist(anchor.unsqueeze(0), negative.unsqueeze(0), p=2)
+
+            distance_positive = torch.cdist(a.unsqueeze(0), p.unsqueeze(0), p=2)
+            distance_negative = torch.cdist(a.unsqueeze(0), n.unsqueeze(0), p=2)
+
+            # losses = F.relu(distance_negative - distance_positive + self.margin)
+            # print(distance_positive.item(), distance_negative.item())
+            # original
+            # distance_positive = (anchor - positive).pow(2).sum(1)  # .pow(.5)
+            # distance_negative = (anchor - negative).pow(2).sum(1)  # .pow(.5)
+            # losses = F.relu(distance_positive - distance_negative + self.margin)
+
+            losses = torch.log(1 + torch.exp(distance_positive.squeeze() - distance_negative.squeeze()))
+            total_loss.append(losses)
+        
+        return torch.stack(total_loss).mean()

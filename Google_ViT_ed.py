@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 from einops import rearrange
 from torch import nn
+from torch.utils.data import DataLoader
 
 ##
 class Residual(nn.Module):
@@ -193,34 +194,6 @@ print(torch.cuda.is_available())
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print(device)
 
-
-# %%
-# CIFAR10
-BATCH_SIZE_TRAIN = 100
-BATCH_SIZE_TEST = 100
-
-DL_PATH = "../CIFAR10_data"  # Use your own path
-# CIFAR10: 60000 32x32 color images in 10 classes, with 6000 images per class
-transform = torchvision.transforms.Compose(
-    [torchvision.transforms.RandomHorizontalFlip(),
-     torchvision.transforms.RandomRotation(10, resample=PIL.Image.BILINEAR),
-     torchvision.transforms.RandomAffine(8, translate=(.15, .15)),
-     torchvision.transforms.ToTensor(),
-     torchvision.transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
-
-
-train_dataset = torchvision.datasets.CIFAR10(DL_PATH, train=True,
-                                             download=True, transform=transform)
-
-test_dataset = torchvision.datasets.CIFAR10(DL_PATH, train=False,
-                                            download=True, transform=transform)
-
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE_TRAIN,
-                                           shuffle=True)
-
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=BATCH_SIZE_TEST,
-                                          shuffle=False)
-
 # %%
 
 # data transform 藥牌
@@ -237,14 +210,14 @@ data_transform = torchvision.transforms.Compose([
 
 # training data loader
 ps1_ps2_train_dataset = torchvision.datasets.ImageFolder(
-    root='/home/ee303/Desktop/blister_classification/datasets/PS1_PS2/train_184', transform=data_transform)
-ps1_ps2_train_loader = torch.utils.data.DataLoader(
-    ps1_ps2_train_dataset, batch_size=16, shuffle=True, num_workers=1)
+    root='./data/train_50', transform=data_transform)
+ps1_ps2_train_loader = DataLoader(
+    ps1_ps2_train_dataset, batch_size=64, shuffle=True, num_workers=1)#, pin_memory=True)
 # testing data loader
 ps1_ps2_test_dataset = torchvision.datasets.ImageFolder(
-    root='/home/ee303/Desktop/blister_classification/datasets/PS1_PS2/test_184', transform=data_transform)
-ps1_ps2_test_loader = torch.utils.data.DataLoader(
-    ps1_ps2_test_dataset, batch_size=16, shuffle=False, num_workers=1)
+    root='./data/test_50', transform=data_transform)
+ps1_ps2_test_loader = DataLoader(
+    ps1_ps2_test_dataset, batch_size=64, shuffle=False, num_workers=1)#, pin_memory=True)
 
 
 # %%
@@ -253,6 +226,7 @@ def train(model, optimizer, data_loader, loss_history):
     model.train()
 
     for i, (data, target) in enumerate(data_loader):
+        print("train iteration")
         #
         data = data.to('cuda')
         target = target.to('cuda')
@@ -265,11 +239,11 @@ def train(model, optimizer, data_loader, loss_history):
         loss.backward()
         optimizer.step()
 
-        if i % 100 == 0:
-            print('[' + '{:5}'.format(i * len(data)) + '/' + '{:5}'.format(total_samples) +
-                  ' (' + '{:3.0f}'.format(100 * i / len(data_loader)) + '%)]  Loss: ' +
-                  '{:6.4f}'.format(loss.item()))
-            loss_history.append(loss.item())
+        # if i % 1 == 0:
+        print('[' + '{:5}'.format(i * len(data)) + '/' + '{:5}'.format(total_samples) +
+                ' (' + '{:3.0f}'.format(100 * i / len(data_loader)) + '%)]  Loss: ' +
+                '{:6.4f}'.format(loss.item()))
+        loss_history.append(loss.item())
 
 
 def evaluate(model, data_loader, loss_history):
@@ -310,7 +284,6 @@ model = ImageTransformer(image_size=512, patch_size=16, num_classes=184, channel
 print(model)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.003)
 
-
 # train
 N_EPOCHS = 150
 train_loss_history, test_loss_history = [], []
@@ -328,47 +301,5 @@ for epoch in range(1, N_EPOCHS + 1):
 
 print('Execution time')
 
-PATH = "./ViTnet_google_74.pt"  # Use your own path
-torch.save(model.state_dict(), PATH)
-
 
 # %%
-# old Cifar10
-# model = ImageTransformer(image_size=32, patch_size=4, num_classes=10, channels=3,
-#                          dim=64, depth=6, heads=8, mlp_dim=128)
-
-# print(model)
-# optimizer = torch.optim.Adam(model.parameters(), lr=0.003)
-
-# # train
-# N_EPOCHS = 150
-# train_loss_history, test_loss_history = [], []
-# for epoch in range(1, N_EPOCHS + 1):
-
-#     print('Epoch:', epoch)
-#     start_time = time.time()
-
-#     train(model, optimizer, train_loader, train_loss_history)
-
-#     print('Execution time:', '{:5.2f}'.format(
-#         time.time() - start_time), 'seconds')
-
-#     evaluate(model, test_loader, test_loss_history)
-
-# print('Execution time')
-
-# PATH = "./ViTnet_Cifar10_4x4_aug_1_edgpu.pt"  # Use your own path
-# torch.save(model.state_dict(), PATH)
-
-# %%
-# =============================================================================
-# model = ViT()
-# PATH = "./ViTnet_Cifar10_4x4_aug_1.pt"  # Use your own path
-# model.load_state_dict(torch.load(PATH))
-# model.eval()
-
-# img = torch.randn(1, 3, 32, 32)
-# preds = model(img)  # (1, 1000)
-# print(preds)
-# print(preds.shape)
-# =============================================================================

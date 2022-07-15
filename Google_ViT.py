@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
 from utils.dataset import TripletBlister_Dataset, Prototype_Dataset
-from utils.losses import TripletLoss, TripletLoss_fix
+from utils.losses import TripletLoss, TripletLoss_fix, TripletLoss_fix2
 from utils.networks import TripletNet
 from tqdm import tqdm
 
@@ -31,18 +31,18 @@ if __name__ == '__main__':
     SAVE_EPOCHS = 1                     # number of epochs to save model
     EVAL_EPOCHS = 5                     # number of epochs to evaluate model
     NUM_WORKERS = 4                     # number of workers for data loader
-    USE_HALF = False                     # use half precision
+    USE_HALF = True                     # use half precision
 
     # hparam
-    IMG_SIZE = 416                      # image size (side length), default: 512
-    PATCH_SIZE = int(IMG_SIZE / 13)     # patch size (num of patch = patch_size ** 2), default: 4
-    DIM = 1024                          # total dimension of q, k, v vectors in each head (dim. of single q, k, v = dim // heads), default: 64
-    DEPTH = 8                           # number of attention layers, default: 6
+    IMG_SIZE = 512                      # image size (side length), default: 512
+    PATCH_SIZE = int(IMG_SIZE / 16)     # patch size (num of patch = patch_size ** 2), default: 4
+    DIM = 64                          # total dimension of q, k, v vectors in each head (dim. of single q, k, v = dim // heads), default: 64
+    DEPTH = 6                           # number of attention layers, default: 6
     HEADS = 8                           # number of attention heads, default: 8
-    OUTPUT_DIM = 1024                   # dimension of output embedding, default: 128
-    LEARNING_RATE = 0.0001              # learning rate
-    BATCH_SIZE_TRAIN = 32               # batch size for training
-    BATCH_SIZE_TEST = 32                # batch size for testing
+    OUTPUT_DIM = 128                   # dimension of output embedding, default: 128
+    LEARNING_RATE = 0.001              # learning rate
+    BATCH_SIZE_TRAIN = 64               # batch size for training
+    BATCH_SIZE_TEST = 64                # batch size for testing
     N_EPOCHS = 150                      # number of epochs
     
     try:
@@ -246,7 +246,7 @@ class ImageTransformer(nn.Module):
         return x
 
 # %%
-# initialize dataloader
+# initialize dataloader (blister)
 if __name__ == '__main__':
     # data transform for blister images
     data_transform = torchvision.transforms.Compose([
@@ -269,17 +269,49 @@ if __name__ == '__main__':
         root=TEST_PATH, transform=data_transform)
     ps1_ps2_test_loader = DataLoader(
         ps1_ps2_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=True, num_workers=NUM_WORKERS)
-
+    
     # Triplet train dataset/dataloader
-    triplet_train_dataset = TripletBlister_Dataset(
-        ps1_ps2_train_dataset)  # Returns triplets of images
+    triplet_train_dataset = TripletBlister_Dataset(ps1_ps2_train_dataset)  # Returns triplets of images
     kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
     triplet_train_loader = DataLoader(
         triplet_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, **kwargs)
 
     # Triplet test dataset/dataloader
-    triplet_test_dataset = TripletBlister_Dataset(
-        ps1_ps2_test_dataset)  # Returns triplets of images
+    triplet_test_dataset = TripletBlister_Dataset(ps1_ps2_test_dataset)  # Returns triplets of images
+    kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
+    triplet_test_loader = DataLoader(
+        triplet_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=True, **kwargs)
+
+# initialize dataloader (cifar)
+if __name__ == '__main__' and False:
+    DL_PATH = "./data/CIFAR10_data" # Use your own path
+    # CIFAR10: 60000 32x32 color images in 10 classes, with 6000 images per class
+    transform = torchvision.transforms.Compose(
+        [torchvision.transforms.RandomHorizontalFlip(),
+        torchvision.transforms.RandomRotation(10, resample=PIL.Image.BILINEAR),
+        torchvision.transforms.RandomAffine(8, translate=(.15,.15)),
+        torchvision.transforms.ToTensor(),
+        torchvision.transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+
+
+    train_dataset = torchvision.datasets.CIFAR10(DL_PATH, train=True,
+                                            download=True, transform=transform)
+
+    test_dataset = torchvision.datasets.CIFAR10(DL_PATH, train=False,
+                                        download=True, transform=transform)
+
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE_TRAIN, num_workers=4, pin_memory=True, shuffle=True)
+
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE_TEST, num_workers=4, pin_memory=True, shuffle=False)
+
+    # Triplet train dataset/dataloader
+    triplet_train_dataset = TripletBlister_Dataset(ps1_ps2_train_dataset)  # Returns triplets of images
+    kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
+    triplet_train_loader = DataLoader(
+        triplet_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, **kwargs)
+
+    # Triplet test dataset/dataloader
+    triplet_test_dataset = TripletBlister_Dataset(ps1_ps2_test_dataset)  # Returns triplets of images
     kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
     triplet_test_loader = DataLoader(
         triplet_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=True, **kwargs)
@@ -419,6 +451,7 @@ def evaluate_classification(model: ImageTransformer, triplet_dataset: TripletBli
             cls_embed = torch.stack(list(cls_idx_2_embed.values()))
             index_2_cls_label = {i: v for i, v in enumerate(list(cls_idx_2_embed.keys()))}
             distances = torch.cdist(outputs, cls_embed, p=2)
+            
             pred_idx = distances.argmin(dim=1).cpu()
             pred_labels = pred_idx.apply_(index_2_cls_label.get)
             results = torch.eq(pred_labels, labels)
@@ -440,7 +473,7 @@ if __name__ == '__main__':
     # model = TripletNet(model)
     if USE_HALF:
         model = model.half()
-    loss_fn = TripletLoss_fix()
+    loss_fn = TripletLoss_fix2()
     optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE)
 
 #%%

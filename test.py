@@ -96,3 +96,22 @@ for cls_idx in range(1):
     plt.imshow((first_img.permute(1, 2, 0)))
 
 # %%
+dest_folder = './data/full_50'
+src_folder = './data/train_50'
+import os
+import shutil
+for cls_idx in range(51):
+    src_path = os.path.join(src_folder, str(cls_idx))
+    dest_path = os.path.join(dest_folder, str(cls_idx))
+    if not os.path.exists(dest_path):
+        os.makedirs(dest_path)
+    for img_name in os.listdir(src_path):
+        src_img_path = os.path.join(src_path, img_name)
+        dest_img_path = os.path.join(dest_path, img_name)
+        shutil.copy(src_img_path, dest_img_path)
+# %%
+tmp_dict = {'a': 1, 'b': 2, 'c': 3}
+print(tmp_dict)
+tmp_dict2 = {i: v for i, v in enumerate(list(tmp_dict.keys()))}
+print(tmp_dict2)
+# %%
