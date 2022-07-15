@@ -503,7 +503,7 @@ if __name__ == '__main__':
         
         # save model
         if epoch % SAVE_EPOCHS == 0:
-            torch.save(model.state_dict(), MODEL_PATH)
+            torch.save(model.state_dict(), MODEL_CHECKPOINT_FOLDER + 'model_' + str(epoch) + '_epochs.pt')
             print('Saved model checkpoint to ' + MODEL_CHECKPOINT_FOLDER + 'model_' + str(epoch) + '_epochs.pt')
 
         epoch += 1
