@@ -13,8 +13,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
 from utils.dataset import TripletBlister_Dataset, Prototype_Dataset
-from utils.losses import TripletLoss, TripletLoss_fix, TripletLoss_fix2
-from utils.networks import TripletNet
+from utils.losses import TripletLoss
 from tqdm import tqdm
 
 #%%
@@ -23,13 +22,14 @@ if __name__ == '__main__':
     # settings
     CUDA_AVAILABLE = torch.cuda.is_available()
     print('CUDA available:', CUDA_AVAILABLE)
-    TRAIN_PATH    = './data/train_50'
-    TEST_PATH     = './data/test_50'
+    TRAIN_PATH    = './data/train_10'
+    TEST_PATH     = './data/test_10'
     
     LOAD_MODEL    = True
     MODEL_PATH    = './models/tmp.pt'
-    SAVE_EPOCHS = 1                     # number of epochs to save model
-    EVAL_EPOCHS = 5                     # number of epochs to evaluate model
+    MODEL_CHECKPOINT_FOLDER = './models/checkpoints/'
+    SAVE_EPOCHS = 50                     # number of epochs to save model
+    EVAL_EPOCHS = 10                     # number of epochs to evaluate model
     NUM_WORKERS = 4                     # number of workers for data loader
     USE_HALF = True                     # use half precision
 
@@ -40,10 +40,11 @@ if __name__ == '__main__':
     DEPTH = 6                           # number of attention layers, default: 6
     HEADS = 8                           # number of attention heads, default: 8
     OUTPUT_DIM = 128                   # dimension of output embedding, default: 128
-    LEARNING_RATE = 0.001              # learning rate
+    LEARNING_RATE = 0.003              # learning rate
+    MOMENTUM = 0.9                     # momentum
     BATCH_SIZE_TRAIN = 64               # batch size for training
     BATCH_SIZE_TEST = 64                # batch size for testing
-    N_EPOCHS = 150                      # number of epochs
+    N_EPOCHS = 10000                      # number of epochs
     
     try:
         # argument parser (for command line arguments)
@@ -80,9 +81,17 @@ if __name__ == '__main__':
         # use default settings if no command line arguments
         print('arguments error, use default settings')
     
-    print('\nArguments:')
+    print('\nSettings:')
+    print('CUDA available:', CUDA_AVAILABLE)
     print('TRAIN_PATH:', TRAIN_PATH)
     print('TEST_PATH:', TEST_PATH)
+    print('LOAD_MODEL:', LOAD_MODEL)
+    print('MODEL_PATH:', MODEL_PATH)
+    print('SAVE_EPOCHS:', SAVE_EPOCHS)
+    print('EVAL_EPOCHS:', EVAL_EPOCHS)
+    print('NUM_WORKERS:', NUM_WORKERS)
+    print('USE_HALF:', USE_HALF)
+    print('\nArguments:')
     print('IMG_SIZE:', IMG_SIZE)
     print('PATCH_SIZE:', PATCH_SIZE)
     print('DIM:', DIM)
@@ -282,40 +291,6 @@ if __name__ == '__main__':
     triplet_test_loader = DataLoader(
         triplet_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=True, **kwargs)
 
-# initialize dataloader (cifar)
-if __name__ == '__main__' and False:
-    DL_PATH = "./data/CIFAR10_data" # Use your own path
-    # CIFAR10: 60000 32x32 color images in 10 classes, with 6000 images per class
-    transform = torchvision.transforms.Compose(
-        [torchvision.transforms.RandomHorizontalFlip(),
-        torchvision.transforms.RandomRotation(10, resample=PIL.Image.BILINEAR),
-        torchvision.transforms.RandomAffine(8, translate=(.15,.15)),
-        torchvision.transforms.ToTensor(),
-        torchvision.transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
-
-
-    train_dataset = torchvision.datasets.CIFAR10(DL_PATH, train=True,
-                                            download=True, transform=transform)
-
-    test_dataset = torchvision.datasets.CIFAR10(DL_PATH, train=False,
-                                        download=True, transform=transform)
-
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE_TRAIN, num_workers=4, pin_memory=True, shuffle=True)
-
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE_TEST, num_workers=4, pin_memory=True, shuffle=False)
-
-    # Triplet train dataset/dataloader
-    triplet_train_dataset = TripletBlister_Dataset(ps1_ps2_train_dataset)  # Returns triplets of images
-    kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
-    triplet_train_loader = DataLoader(
-        triplet_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, **kwargs)
-
-    # Triplet test dataset/dataloader
-    triplet_test_dataset = TripletBlister_Dataset(ps1_ps2_test_dataset)  # Returns triplets of images
-    kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
-    triplet_test_loader = DataLoader(
-        triplet_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=True, **kwargs)
-
 #%%
 # train, evaluation functions
 
@@ -401,7 +376,7 @@ def evaluate(model, data_loader, loss_fn, loss_history):
 
 # get class embedding (dict) by averaging embeddings of all images in the class
 def get_class_embed(model, triplet_dataset):
-    prototype_dataset = Prototype_Dataset(triplet_dataset.blister_dataset, len(triplet_dataset.labels_set), list(range(48)))
+    prototype_dataset = Prototype_Dataset(triplet_dataset.blister_dataset, len(triplet_dataset.labels_set))
     model.eval()
     if CUDA_AVAILABLE:
         model = model.cuda()
@@ -473,8 +448,8 @@ if __name__ == '__main__':
     # model = TripletNet(model)
     if USE_HALF:
         model = model.half()
-    loss_fn = TripletLoss_fix2()
-    optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE)
+    loss_fn = TripletLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM)
 
 #%%
 # run
@@ -500,7 +475,8 @@ if __name__ == '__main__':
             print('Model not found at ' + MODEL_PATH)
     
     # train/evaluate loop
-    for epoch in range(1, N_EPOCHS + 1):
+    epoch = len(train_loss_history) + 1
+    while epoch < N_EPOCHS + 1:
         print('Epoch:{}/{}'.format(epoch, N_EPOCHS))
         train(model, optimizer, triplet_train_loader, loss_fn, train_loss_history)
         
@@ -521,10 +497,15 @@ if __name__ == '__main__':
         # save loss history to csv with pandas
         train_log_df = pd.DataFrame({'train_loss': train_loss_history, 'test_loss': test_loss_history, 'train_acc': train_acc_history, 'test_acc': test_acc_history})
         train_log_df.to_csv('train_log.csv')
+
+        torch.save(model.state_dict(), MODEL_PATH)
+        print('Saved model to ' + MODEL_PATH)
         
         # save model
         if epoch % SAVE_EPOCHS == 0:
             torch.save(model.state_dict(), MODEL_PATH)
-            print('Saved model to ' + MODEL_PATH)
+            print('Saved model checkpoint to ' + MODEL_CHECKPOINT_FOLDER + 'model_' + str(epoch) + '_epochs.pt')
+
+        epoch += 1
 
 #%%

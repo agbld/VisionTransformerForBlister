@@ -5,14 +5,14 @@ import torch.nn.functional as F
 from sklearn.metrics.pairwise import cosine_similarity
 
 
-class TripletLoss(nn.Module):
+class TripletLoss_bug(nn.Module):
     """
     Triplet loss
     Takes embeddings of an anchor sample, a positive sample and a negative sample
     """
 
     def __init__(self):
-        super(TripletLoss, self).__init__()
+        super(TripletLoss_bug, self).__init__()
 
     def forward(self, anchor, positive, negative, size_average=True):
         distance_positive = torch.cdist(
@@ -25,14 +25,15 @@ class TripletLoss(nn.Module):
 
         return losses.mean() if size_average else losses.sum()
 
-class TripletLoss_fix(nn.Module):
+# my triplet loss fix, using in this project
+class TripletLoss(nn.Module):
     """
     Triplet loss
     Takes embeddings of an anchor sample, a positive sample and a negative sample
     """
 
     def __init__(self):
-        super(TripletLoss_fix, self).__init__()
+        super(TripletLoss, self).__init__()
 
     def forward(self, anchor, positive, negative, size_average=True):
         distance_positive = torch.cdist(
@@ -45,6 +46,7 @@ class TripletLoss_fix(nn.Module):
 
         return losses.mean() if size_average else losses.sum()
 
+# triplet loss fix solution from lab 
 class TripletLoss_fix2(nn.Module):
     """
     Triplet loss

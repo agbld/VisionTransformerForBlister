@@ -40,7 +40,7 @@ class TripletBlister_Dataset(Dataset):
 
 class Prototype_Dataset(Dataset):
 
-    def __init__(self, dataset, class_num, prototype_index):
+    def __init__(self, dataset, class_num, prototype_index = None):
         
         self.transform = dataset.transform
         self.train_paths = [item[0] for item in dataset.imgs]
@@ -56,7 +56,9 @@ class Prototype_Dataset(Dataset):
         image_index = self.label_to_indices[index]
         all_prototype_img = []
         
-        for each_index in image_index[self.prototype_index]:
+        if self.prototype_index != None:
+            image_index = image_index[self.prototype_index]
+        for each_index in image_index:
             all_prototype_img.append(self.transform(Image.open(self.train_paths[each_index])))
         
         return all_prototype_img
