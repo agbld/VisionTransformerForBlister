@@ -12,7 +12,7 @@ import torchvision
 import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
-from utils.dataset import TripletBlister_Dataset, Prototype_Dataset
+from utils.dataset import TripletBlister_Dataset, Prototype_Dataset, TripletBlister_Dataset_mod
 from utils.losses import TripletLoss
 from tqdm import tqdm
 
@@ -44,6 +44,7 @@ if __name__ == '__main__':
     MOMENTUM = 0.9                     # momentum
     BATCH_SIZE_TRAIN = 64               # batch size for training
     BATCH_SIZE_TEST = 64                # batch size for testing
+    NEG_RATIO = 2                      # number of negative samples per positive sample
     N_EPOCHS = 10000                      # number of epochs
     
     try:
@@ -60,6 +61,7 @@ if __name__ == '__main__':
         parser.add_argument('--learning_rate', type=float, default=LEARNING_RATE)
         parser.add_argument('--batch_size_train', type=int, default=BATCH_SIZE_TRAIN)
         parser.add_argument('--batch_size_test', type=int, default=BATCH_SIZE_TEST)
+        parser.add_argument('--neg_ratio', type=int, default=NEG_RATIO)
         parser.add_argument('--n_epochs', type=int, default=N_EPOCHS)
         args = parser.parse_args()
         
@@ -75,6 +77,7 @@ if __name__ == '__main__':
         LEARNING_RATE = args.learning_rate
         BATCH_SIZE_TRAIN = args.batch_size_train
         BATCH_SIZE_TEST = args.batch_size_test
+        NEG_RATIO     = args.neg_ratio
         N_EPOCHS      = args.n_epochs
         
     except:
@@ -101,6 +104,7 @@ if __name__ == '__main__':
     print('LEARNING_RATE:', LEARNING_RATE)
     print('BATCH_SIZE_TRAIN:', BATCH_SIZE_TRAIN)
     print('BATCH_SIZE_TEST:', BATCH_SIZE_TEST)
+    print('NEG_RATIO:', NEG_RATIO)
     print('N_EPOCHS:', N_EPOCHS)
 
 #%%
@@ -278,18 +282,30 @@ if __name__ == '__main__':
         root=TEST_PATH, transform=data_transform)
     ps1_ps2_test_loader = DataLoader(
         ps1_ps2_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=True, num_workers=NUM_WORKERS)
-    
-    # Triplet train dataset/dataloader
-    triplet_train_dataset = TripletBlister_Dataset(ps1_ps2_train_dataset)  # Returns triplets of images
+
+    # Triplet train dataset/dataloader with multiple negative samples
+    triplet_train_dataset = TripletBlister_Dataset_mod(ps1_ps2_train_dataset, NEG_RATIO)
     kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
     triplet_train_loader = DataLoader(
         triplet_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, **kwargs)
 
-    # Triplet test dataset/dataloader
-    triplet_test_dataset = TripletBlister_Dataset(ps1_ps2_test_dataset)  # Returns triplets of images
+    # Triplet test dataset/dataloader with multiple negative samples
+    triplet_test_dataset = TripletBlister_Dataset_mod(ps1_ps2_test_dataset, NEG_RATIO)
     kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
     triplet_test_loader = DataLoader(
-        triplet_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=True, **kwargs)
+        triplet_test_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, **kwargs)
+    
+    # # Triplet train dataset/dataloader
+    # triplet_train_dataset = TripletBlister_Dataset(ps1_ps2_train_dataset)  # Returns triplets of images
+    # kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
+    # triplet_train_loader = DataLoader(
+    #     triplet_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, **kwargs)
+
+    # # Triplet test dataset/dataloader
+    # triplet_test_dataset = TripletBlister_Dataset(ps1_ps2_test_dataset)  # Returns triplets of images
+    # kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
+    # triplet_test_loader = DataLoader(
+    #     triplet_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=True, **kwargs)
 
 #%%
 # train, evaluation functions

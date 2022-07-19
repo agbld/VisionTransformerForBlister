@@ -37,6 +37,18 @@ class TripletBlister_Dataset(Dataset):
     def __len__(self):
         return len(self.blister_dataset)
 
+class TripletBlister_Dataset_mod(TripletBlister_Dataset):
+    def __init__(self, blister_dataset, neg_ratio:int=1):
+        super().__init__(blister_dataset)
+        self.neg_ratio = int(neg_ratio)
+
+    def __getitem__(self, index):
+        actual_index = index % len(self.blister_dataset)
+        return super().__getitem__(actual_index)
+
+    def __len__(self):
+        return super().__len__() * self.neg_ratio
+
 
 class Prototype_Dataset(Dataset):
 
