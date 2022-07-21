@@ -15,20 +15,23 @@ from torch import nn
 from utils.dataset import TripletDataset, Prototype_Dataset
 from utils.losses import TripletLoss
 from tqdm import tqdm
+import wandb
 
 #%%
 # settings and hyperparameters
 if __name__ == '__main__':
+    wandb.init(project="simple_vit.icl.ntust", entity="agbld")
+    
     # settings
     CUDA_AVAILABLE = torch.cuda.is_available()
     print('CUDA available:', CUDA_AVAILABLE)
     TRAIN_PATH    = './data/train_10'
     TEST_PATH     = './data/test_10'
     
-    LOAD_MODEL    = True
-    MODEL_PATH    = './models/tmp.pt'
-    MODEL_CHECKPOINT_FOLDER = './models/checkpoints/'
-    SAVE_EPOCHS = 50                     # number of epochs to save model
+    # LOAD_MODEL    = True
+    # MODEL_PATH    = './models/tmp.pt'
+    # MODEL_CHECKPOINT_FOLDER = './models/checkpoints/'
+    # SAVE_EPOCHS = 50                     # number of epochs to save model
     EVAL_EPOCHS = 10                     # number of epochs to evaluate model
     NUM_WORKERS = 4                     # number of workers for data loader
     USE_HALF = True                     # use half precision
@@ -46,7 +49,7 @@ if __name__ == '__main__':
     BATCH_SIZE_TEST = 64                # batch size for testing
     NUM_POS = 10                       # number of positive samples per class
     NEG_RATIO = 2                      # number of negative samples per positive sample
-    N_EPOCHS = 10000                      # number of epochs
+    N_EPOCHS = 500                      # number of epochs
     
     try:
         # argument parser (for command line arguments)
@@ -91,9 +94,9 @@ if __name__ == '__main__':
     print('CUDA available:', CUDA_AVAILABLE)
     print('TRAIN_PATH:', TRAIN_PATH)
     print('TEST_PATH:', TEST_PATH)
-    print('LOAD_MODEL:', LOAD_MODEL)
-    print('MODEL_PATH:', MODEL_PATH)
-    print('SAVE_EPOCHS:', SAVE_EPOCHS)
+    # print('LOAD_MODEL:', LOAD_MODEL)
+    # print('MODEL_PATH:', MODEL_PATH)
+    # print('SAVE_EPOCHS:', SAVE_EPOCHS)
     print('EVAL_EPOCHS:', EVAL_EPOCHS)
     print('NUM_WORKERS:', NUM_WORKERS)
     print('USE_HALF:', USE_HALF)
@@ -110,6 +113,30 @@ if __name__ == '__main__':
     print('NUM_POS:', NUM_POS)
     print('NEG_RATIO:', NEG_RATIO)
     print('N_EPOCHS:', N_EPOCHS)
+    
+    wandb.config = {
+        'CUDA_AVAILABLE': CUDA_AVAILABLE,
+        'TRAIN_PATH': TRAIN_PATH,
+        'TEST_PATH': TEST_PATH,
+        # 'LOAD_MODEL': LOAD_MODEL,
+        # 'MODEL_PATH': MODEL_PATH,
+        # 'SAVE_EPOCHS': SAVE_EPOCHS,
+        'EVAL_EPOCHS': EVAL_EPOCHS, 
+        'NUM_WORKERS': NUM_WORKERS,
+        'USE_HALF': USE_HALF,
+        'IMG_SIZE': IMG_SIZE,
+        'PATCH_SIZE': PATCH_SIZE,
+        'DIM': DIM,
+        'DEPTH': DEPTH,
+        'HEADS': HEADS,
+        'OUTPUT_DIM': MLP_DIM,
+        'LEARNING_RATE': LEARNING_RATE,
+        'BATCH_SIZE_TRAIN': BATCH_SIZE_TRAIN,
+        'BATCH_SIZE_TEST': BATCH_SIZE_TEST,
+        'NUM_POS': NUM_POS,
+        'NEG_RATIO': NEG_RATIO,
+        'N_EPOCHS': N_EPOCHS
+    }
 
 #%%
 # model definition
@@ -147,7 +174,6 @@ class MLP_Block(nn.Module):
         x = self.do1(x)
         x = self.nn2(x)
         x = self.do2(x)
-        
         return x
 
 class Attention(nn.Module):
@@ -371,7 +397,7 @@ def evaluate(model, data_loader, loss_fn, loss_history):
     with tqdm(total=total_samples, desc='Evaluating triplet') as t:
         loss_history_epoch = []
         with torch.no_grad():
-            for i, (item, target) in enumerate(data_loader):
+            for i, item in enumerate(data_loader):
                 anchor, pos, neg = item
                 if CUDA_AVAILABLE:
                     anchor = anchor.cuda()
@@ -395,8 +421,8 @@ def evaluate(model, data_loader, loss_fn, loss_history):
     loss_history.append(np.mean(loss_epoch))
 
 # get class embedding (dict) by averaging embeddings of all images in the class
-def get_class_embed(model, triplet_dataset):
-    prototype_dataset = Prototype_Dataset(triplet_dataset.blister_dataset, len(triplet_dataset.labels_set))
+def get_class_embed(model, triplet_dataset: TripletDataset):
+    prototype_dataset = Prototype_Dataset(triplet_dataset.img_folder_dataset, len(triplet_dataset.labels_set))
     model.eval()
     if CUDA_AVAILABLE:
         model = model.cuda()
@@ -479,20 +505,20 @@ if __name__ == '__main__':
     # read loss history from csv with pandas if exists
     train_loss_history, test_loss_history = [], []
     train_acc_history, test_acc_history = [], []
-    if os.path.exists('train_log.csv'):
-        train_log_df = pd.read_csv('train_log.csv')
-        train_loss_history = train_log_df['train_loss'].tolist()
-        test_loss_history = train_log_df['test_loss'].tolist()
-        train_acc_history = train_log_df['train_acc'].tolist()
-        test_acc_history = train_log_df['test_acc'].tolist()
+    # if os.path.exists('train_log.csv'):
+    #     train_log_df = pd.read_csv('train_log.csv')
+    #     train_loss_history = train_log_df['train_loss'].tolist()
+    #     test_loss_history = train_log_df['test_loss'].tolist()
+    #     train_acc_history = train_log_df['train_acc'].tolist()
+    #     test_acc_history = train_log_df['test_acc'].tolist()
     
     # load model if exists
-    if LOAD_MODEL:
-        if os.path.exists(MODEL_PATH):
-            print('Loading model from ' + MODEL_PATH)
-            model.load_state_dict(torch.load(MODEL_PATH))
-        else:
-            print('Model not found at ' + MODEL_PATH)
+    # if LOAD_MODEL:
+    #     if os.path.exists(MODEL_PATH):
+    #         print('Loading model from ' + MODEL_PATH)
+    #         model.load_state_dict(torch.load(MODEL_PATH))
+    #     else:
+    #         print('Model not found at ' + MODEL_PATH)
     
     # train/evaluate loop
     epoch = len(train_loss_history) + 1
@@ -514,17 +540,7 @@ if __name__ == '__main__':
             train_acc_history.append(None)
             test_acc_history.append(None)
         
-        # save loss history to csv with pandas
-        train_log_df = pd.DataFrame({'train_loss': train_loss_history, 'test_loss': test_loss_history, 'train_acc': train_acc_history, 'test_acc': test_acc_history})
-        train_log_df.to_csv('train_log.csv')
-
-        torch.save(model.state_dict(), MODEL_PATH)
-        print('Saved model to ' + MODEL_PATH)
-        
-        # save model
-        if epoch % SAVE_EPOCHS == 0:
-            torch.save(model.state_dict(), MODEL_CHECKPOINT_FOLDER + 'model_' + str(epoch) + '_epochs.pt')
-            print('Saved model checkpoint to ' + MODEL_CHECKPOINT_FOLDER + 'model_' + str(epoch) + '_epochs.pt')
+        wandb.log({'train_loss': train_loss_history[-1], 'test_loss': test_loss_history[-1], 'train_acc': train_acc_history[-1], 'test_acc': test_acc_history[-1]})
 
         epoch += 1
 
