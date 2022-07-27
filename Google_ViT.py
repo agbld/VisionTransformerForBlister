@@ -80,6 +80,7 @@ if __name__ == '__main__':
         LEARNING_RATE = args.learning_rate
         BATCH_SIZE_TRAIN = args.batch_size_train
         BATCH_SIZE_TEST = args.batch_size_test
+        NUM_POS = args.num_pos
         NEG_RATIO     = args.neg_ratio
         LAMBDA         = args.reg_lambda
         N_EPOCHS      = args.n_epochs
@@ -108,6 +109,7 @@ if __name__ == '__main__':
     print('LEARNING_RATE:', LEARNING_RATE)
     print('BATCH_SIZE_TRAIN:', BATCH_SIZE_TRAIN)
     print('BATCH_SIZE_TEST:', BATCH_SIZE_TEST)
+    print('NUM_POS:', NUM_POS)
     print('NEG_RATIO:', NEG_RATIO)
     print('LAMBDA:', LAMBDA)
     print('N_EPOCHS:', N_EPOCHS)
@@ -289,13 +291,13 @@ if __name__ == '__main__':
         ps1_ps2_test_dataset, batch_size=BATCH_SIZE_TEST, shuffle=True, num_workers=NUM_WORKERS)
 
     # Triplet train dataset/dataloader with multiple negative samples
-    triplet_train_dataset = TripletBlister_Dataset_mod(ps1_ps2_train_dataset, NEG_RATIO)
+    triplet_train_dataset = TripletBlister_Dataset_mod(ps1_ps2_train_dataset, num_pos=NUM_POS, neg_ratio=NEG_RATIO)
     kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
     triplet_train_loader = DataLoader(
         triplet_train_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, **kwargs)
 
     # Triplet test dataset/dataloader with multiple negative samples
-    triplet_test_dataset = TripletBlister_Dataset_mod(ps1_ps2_test_dataset, NEG_RATIO)
+    triplet_test_dataset = TripletBlister_Dataset_mod(ps1_ps2_test_dataset, num_pos=NUM_POS, neg_ratio=NEG_RATIO)
     kwargs = {'num_workers': NUM_WORKERS, 'pin_memory': True} if CUDA_AVAILABLE else {}
     triplet_test_loader = DataLoader(
         triplet_test_dataset, batch_size=BATCH_SIZE_TRAIN, shuffle=True, **kwargs)
@@ -323,7 +325,7 @@ def train(model, optimizer, data_loader, triplet_loss, koleo_loss, loss_history)
 
     with tqdm(total=total_samples, desc='Training') as t:
         loss_history_epoch = []
-        for i, (item, target) in enumerate(data_loader):
+        for i, item in enumerate(data_loader):
             optimizer.zero_grad()
             
             anchor, pos, neg = item
@@ -435,7 +437,7 @@ def get_class_embed(model, triplet_dataset):
     return cls_idx_2_embed
 
 # evaluate model in classification task
-def evaluate_classification(model: ImageTransformer, triplet_dataset: TripletBlister_Dataset, blister_loader: DataLoader, acc_history, cls_idx_2_embed = None, desc='Evaluating classification'):
+def evaluate_classification(model: ImageTransformer, triplet_dataset: TripletBlister_Dataset_mod, blister_loader: DataLoader, acc_history, cls_idx_2_embed = None, desc='Evaluating classification'):
     model.eval()
     if CUDA_AVAILABLE:
         model = model.cuda()
