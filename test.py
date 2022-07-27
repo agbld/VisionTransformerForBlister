@@ -51,18 +51,17 @@ dist_fixed = torch.cdist(t1.unsqueeze(1), t2.unsqueeze(1))   # this output a mat
 print('dist_fixed.shape: ', dist_fixed.shape)
 
 # %%
-from utils.dataset import TripletBlister_Dataset, Prototype_Dataset
+from utils.dataset import TripletBlister_Dataset, Prototype_Dataset, TripletDataset
 import torchvision
 import PIL
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-TRAIN_PATH    = './data/train_50'
-IMG_SIZE = 416
+TRAIN_PATH    = './data/train_10'
+IMG_SIZE = 512
 
 data_transform = torchvision.transforms.Compose([
-    torchvision.transforms.CenterCrop(512),
     torchvision.transforms.Resize([IMG_SIZE, IMG_SIZE]),
     torchvision.transforms.RandomHorizontalFlip(),
     torchvision.transforms.RandomRotation(10, resample=PIL.Image.BILINEAR),
@@ -75,10 +74,11 @@ data_transform = torchvision.transforms.Compose([
     ])
 ps1_ps2_train_dataset = torchvision.datasets.ImageFolder(
     root=TRAIN_PATH, transform=data_transform)
-triplet_train_dataset = TripletBlister_Dataset(
-    ps1_ps2_train_dataset)  # Returns triplets of images
-prototype_train_dataset = Prototype_Dataset(ps1_ps2_train_dataset, len(triplet_train_dataset.labels_set), list(range(48)))
+triplet_train_dataset = TripletDataset(ps1_ps2_train_dataset, 10, 2)
+# prototype_train_dataset = Prototype_Dataset(ps1_ps2_train_dataset, len(triplet_train_dataset.labels_set), list(range(48)))
 
+
+#%%
 mean_list = []
 std_list = []
 for cls_idx in range(1):
@@ -114,4 +114,25 @@ tmp_dict = {'a': 1, 'b': 2, 'c': 3}
 print(tmp_dict)
 tmp_dict2 = {i: v for i, v in enumerate(list(tmp_dict.keys()))}
 print(tmp_dict2)
+# %%
+import numpy as np
+
+a = 1
+b = np.repeat(a, 3)
+
+print(b)
+#%%
+tmp_dict = {'a': 1, 'b': 2, 'c': 3}
+tmp_list = [1, 2, 5]
+def func(a, b, c):
+    print(a, b, c)
+    
+    
+#%%
+import torch
+
+t1 = torch.Tensor([[0, 1, 4, 0], [1,3,5,0]])
+
+
+# d1 = (t1.unsqueeze(0), t2.unsqueeze(0))
 # %%

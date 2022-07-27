@@ -13,8 +13,9 @@ import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
 from utils.dataset import TripletBlister_Dataset, Prototype_Dataset, TripletBlister_Dataset_mod
-from utils.losses import TripletLoss
+from utils.losses import TripletLoss, KoLeoLoss_Triplet, KoLeoLoss_Contrastive
 from tqdm import tqdm
+import datetime
 
 #%%
 # settings and hyperparameters
@@ -29,8 +30,8 @@ if __name__ == '__main__':
     MODEL_PATH    = './models/tmp.pt'
     MODEL_CHECKPOINT_FOLDER = './models/checkpoints/'
     SAVE_EPOCHS = 50                     # number of epochs to save model
-    EVAL_EPOCHS = 10                     # number of epochs to evaluate model
-    NUM_WORKERS = 4                     # number of workers for data loader
+    EVAL_EPOCHS = 1                     # number of epochs to evaluate model
+    NUM_WORKERS = 8                     # number of workers for data loader
     USE_HALF = True                     # use half precision
 
     # hparam
@@ -39,12 +40,13 @@ if __name__ == '__main__':
     DIM = 64                          # total dimension of q, k, v vectors in each head (dim. of single q, k, v = dim // heads), default: 64
     DEPTH = 6                           # number of attention layers, default: 6
     HEADS = 8                           # number of attention heads, default: 8
-    OUTPUT_DIM = 128                   # dimension of output embedding, default: 128
+    MLP_DIM = 128                   # dimension of MLP hidden layer, default: 128
     LEARNING_RATE = 0.003              # learning rate
     MOMENTUM = 0.9                     # momentum
-    BATCH_SIZE_TRAIN = 64               # batch size for training
-    BATCH_SIZE_TEST = 64                # batch size for testing
+    BATCH_SIZE_TRAIN = 32               # batch size for training
+    BATCH_SIZE_TEST = 32                # batch size for testing
     NEG_RATIO = 2                      # number of negative samples per positive sample
+    LAMBDA = 0.5                       # lambda for KoLeoLoss
     N_EPOCHS = 10000                      # number of epochs
     
     try:
@@ -57,11 +59,12 @@ if __name__ == '__main__':
         parser.add_argument('--dim', type=int, default=DIM)
         parser.add_argument('--depth', type=int, default=DEPTH)
         parser.add_argument('--heads', type=int, default=HEADS)
-        parser.add_argument('--output_dim', type=int, default=OUTPUT_DIM)
+        parser.add_argument('--mlp_dim', type=int, default=MLP_DIM)
         parser.add_argument('--learning_rate', type=float, default=LEARNING_RATE)
         parser.add_argument('--batch_size_train', type=int, default=BATCH_SIZE_TRAIN)
         parser.add_argument('--batch_size_test', type=int, default=BATCH_SIZE_TEST)
         parser.add_argument('--neg_ratio', type=int, default=NEG_RATIO)
+        parser.add_argument('--reg_lambda', type=float, default=LAMBDA)
         parser.add_argument('--n_epochs', type=int, default=N_EPOCHS)
         args = parser.parse_args()
         
@@ -73,11 +76,12 @@ if __name__ == '__main__':
         DIM           = args.dim
         DEPTH         = args.depth
         HEADS         = args.heads
-        OUTPUT_DIM    = args.output_dim
+        MLP_DIM    = args.mlp_dim
         LEARNING_RATE = args.learning_rate
         BATCH_SIZE_TRAIN = args.batch_size_train
         BATCH_SIZE_TEST = args.batch_size_test
         NEG_RATIO     = args.neg_ratio
+        LAMBDA         = args.reg_lambda
         N_EPOCHS      = args.n_epochs
         
     except:
@@ -100,11 +104,12 @@ if __name__ == '__main__':
     print('DIM:', DIM)
     print('DEPTH:', DEPTH)
     print('HEADS:', HEADS)
-    print('OUTPUT_DIM:', OUTPUT_DIM)
+    print('OUTPUT_DIM:', MLP_DIM)
     print('LEARNING_RATE:', LEARNING_RATE)
     print('BATCH_SIZE_TRAIN:', BATCH_SIZE_TRAIN)
     print('BATCH_SIZE_TEST:', BATCH_SIZE_TEST)
     print('NEG_RATIO:', NEG_RATIO)
+    print('LAMBDA:', LAMBDA)
     print('N_EPOCHS:', N_EPOCHS)
 
 #%%
@@ -310,7 +315,7 @@ if __name__ == '__main__':
 #%%
 # train, evaluation functions
 
-def train(model, optimizer, data_loader, loss_fn, loss_history):
+def train(model, optimizer, data_loader, triplet_loss, koleo_loss, loss_history):
     total_samples = len(data_loader.dataset)
     model.train()
     if CUDA_AVAILABLE:
@@ -330,11 +335,16 @@ def train(model, optimizer, data_loader, loss_fn, loss_history):
             if USE_HALF:
                 anchor, pos, neg = anchor.half(), pos.half(), neg.half()
             
-            anchor_output = model(anchor).float()
-            pos_output = model(pos).float()
-            neg_output = model(neg).float()
+            # anchor_output = model(anchor).float()
+            # pos_output = model(pos).float()
+            # neg_output = model(neg).float()
             
-            # anchor_output, pos_output, neg_output = model(anchor, pos, neg)
+            inputs = torch.cat((anchor, pos, neg), dim=0)
+            outputs = model(inputs).float()
+            size = outputs.shape[0]
+            anchor_output = outputs[:size//3]
+            pos_output = outputs[size//3:2*size//3]
+            neg_output = outputs[2*size//3:]
             
             # assert if any input of loss_fn is nan
             if torch.isnan(anchor_output).any() or torch.isnan(pos_output).any() or torch.isnan(neg_output).any():
@@ -344,7 +354,7 @@ def train(model, optimizer, data_loader, loss_fn, loss_history):
                 print('\n')
                 assert False and 'nan detected in loss_fn inputs'
                 
-            loss = loss_fn(anchor_output, pos_output, neg_output)
+            loss = triplet_loss(anchor_output, pos_output, neg_output) + LAMBDA * koleo_loss(anchor_output, pos_output, neg_output)
             
             loss.backward()
             optimizer.step()
@@ -358,7 +368,7 @@ def train(model, optimizer, data_loader, loss_fn, loss_history):
     
     loss_history.append(loss_epoch)
 
-def evaluate(model, data_loader, loss_fn, loss_history):
+def evaluate(model, data_loader, triplet_loss, koleo_loss, loss_history):
     total_samples = len(data_loader.dataset)
     model.eval()
     if CUDA_AVAILABLE:
@@ -376,10 +386,19 @@ def evaluate(model, data_loader, loss_fn, loss_history):
                 if USE_HALF:
                     anchor, pos, neg = anchor.half(), pos.half(), neg.half()
                 
-                anchor_output = model(anchor)
-                pos_output = model(pos)
-                neg_output = model(neg)
-                loss = loss_fn(anchor_output.float(), pos_output.float(), neg_output.float())
+                # anchor_output = model(anchor)
+                # pos_output = model(pos)
+                # neg_output = model(neg)
+            
+                inputs = torch.cat((anchor, pos, neg), dim=0)
+                outputs = model(inputs).float()
+                size = outputs.shape[0]
+                anchor_output = outputs[:size//3]
+                pos_output = outputs[size//3:2*size//3]
+                neg_output = outputs[2*size//3:]
+                
+                # loss = loss_fn(anchor_output.float(), pos_output.float(), neg_output.float())
+                loss = triplet_loss(anchor_output, pos_output, neg_output) + LAMBDA * koleo_loss(anchor_output, pos_output, neg_output)
 
                 loss_history_epoch.append(loss.item())
                 t.set_postfix(loss='{:.4f}'.format(loss.item()))
@@ -441,7 +460,7 @@ def evaluate_classification(model: ImageTransformer, triplet_dataset: TripletBli
             
             cls_embed = torch.stack(list(cls_idx_2_embed.values()))
             index_2_cls_label = {i: v for i, v in enumerate(list(cls_idx_2_embed.keys()))}
-            distances = torch.cdist(outputs, cls_embed, p=2)
+            distances = torch.cdist(outputs.float(), cls_embed.float(), p=2)
             
             pred_idx = distances.argmin(dim=1).cpu()
             pred_labels = pred_idx.apply_(index_2_cls_label.get)
@@ -460,11 +479,12 @@ def evaluate_classification(model: ImageTransformer, triplet_dataset: TripletBli
 # initialize model
 if __name__ == '__main__':
     model = ImageTransformer(image_size=IMG_SIZE, patch_size=PATCH_SIZE, channels=3,
-                dim=DIM, depth=DEPTH, heads=HEADS, mlp_dim=OUTPUT_DIM)
+                dim=DIM, depth=DEPTH, heads=HEADS, mlp_dim=MLP_DIM)
     # model = TripletNet(model)
     if USE_HALF:
         model = model.half()
-    loss_fn = TripletLoss()
+    triplet_loss = TripletLoss()
+    koleo_loss = KoLeoLoss_Triplet()
     optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM)
 
 #%%
@@ -494,12 +514,12 @@ if __name__ == '__main__':
     epoch = len(train_loss_history) + 1
     while epoch < N_EPOCHS + 1:
         print('Epoch:{}/{}'.format(epoch, N_EPOCHS))
-        train(model, optimizer, triplet_train_loader, loss_fn, train_loss_history)
+        train(model, optimizer, triplet_train_loader, triplet_loss, koleo_loss, train_loss_history)
         
         # evaluation with triplet loss and classification task
         if epoch % EVAL_EPOCHS == 0:
             # evaluate with triplet loss
-            evaluate(model, triplet_test_loader, loss_fn, test_loss_history)
+            evaluate(model, triplet_test_loader, triplet_loss, koleo_loss, test_loss_history)
             
             # evaluate in classification task
             cls_2_embed = get_class_embed(model, triplet_train_dataset)

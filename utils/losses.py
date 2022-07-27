@@ -4,6 +4,40 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics.pairwise import cosine_similarity
 
+class KoLeoLoss_Triplet(nn.Module):
+    def __init__(self):
+        super(KoLeoLoss_Triplet, self).__init__()
+
+    def forward(self, anchor, positive, negative):
+        d_anchor_anchor = torch.cdist(anchor, anchor)
+        d_anchor_positive = torch.cdist(anchor, positive)
+        d_anchor_negative = torch.cdist(anchor, negative)
+        d = torch.cat((d_anchor_anchor, d_anchor_positive, d_anchor_negative), dim=1)
+        d_remove_self = torch.where(d == 0, d.max(), d)
+        min_d = torch.min(d_remove_self, dim=1)[0]
+        
+        n = anchor.shape[0]
+        
+        loss_koleo = -(1/n) * torch.sum(torch.log(min_d))
+        
+        return loss_koleo
+    
+class KoLeoLoss_Contrastive(nn.Module):
+    def __init__(self):
+        super(KoLeoLoss_Contrastive, self).__init__()
+
+    def forward(self, anchor, sample):
+        d_anchor_anchor = torch.cdist(anchor, anchor)
+        d_anchor_sample = torch.cdist(anchor, sample)
+        d = torch.cat((d_anchor_anchor, d_anchor_sample), dim=1)
+        d_remove_self = torch.where(d == 0, d.max(), d)
+        min_d = torch.min(d_remove_self, dim=1)[0]
+        
+        n = anchor.shape[0]
+        
+        loss_koleo = -(1/n) * torch.sum(torch.log(min_d))
+        
+        return loss_koleo
 
 class TripletLoss_bug(nn.Module):
     """
