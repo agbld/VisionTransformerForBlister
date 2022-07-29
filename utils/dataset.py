@@ -90,6 +90,35 @@ class TripletBlister_Dataset(Dataset):
     def __len__(self):
         return len(self.blister_dataset)
 
+class ContrastiveBlister_Dataset(Dataset):
+    def __init__(self, blister_dataset, num_samples: int=10):
+        self.blister_dataset = blister_dataset
+        self.transform = self.blister_dataset.transform
+
+        self.train_paths = [item[0] for item in self.blister_dataset.imgs]
+        self.train_labels = np.array([item[1] for item in self.blister_dataset.imgs])
+        self.labels_set = set(self.train_labels)
+        self.label_to_indices = {label: np.where(self.train_labels == label)[0]
+                                    for label in self.labels_set}
+
+    def __getitem__(self, index):
+        actual_index = index % len(self.blister_dataset)
+        # 取 anchor
+        anchor_label = self.train_labels[actual_index].item()
+        anchor_img = Image.open(self.train_paths[index])
+        
+        sample_label = np.random.choice(list(self.labels_set - set([anchor_label])))
+        sample_img = Image.open(self.train_paths[np.random.choice(self.label_to_indices[sample_label])])
+        
+        y = 1 if sample_label == anchor_label else 0
+        
+        if self.transform is not None:
+            anchor_img = self.transform(anchor_img)
+            sample_img = self.transform(sample_img)
+        return (anchor_img, sample_img, y)
+    def __len__(self):
+        return len(self.blister_dataset)
+
 class TripletBlister_Dataset_mod(TripletBlister_Dataset):
     def __init__(self, blister_dataset, neg_ratio:int=1):
         super().__init__(blister_dataset)
